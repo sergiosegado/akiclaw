@@ -8,6 +8,7 @@ MiniMax M2.7 hardened: context size tracking, auto-truncation, null-response han
 import asyncio
 import json
 import os
+import re
 import logging
 from pathlib import Path
 
@@ -20,9 +21,9 @@ log = logging.getLogger("akc.llm")
 AKICLAW_HOME = Path(os.environ.get("AKICLAW_HOME", "/agent-data"))
 CONFIG_FILE = AKICLAW_HOME / "config.json"
 
-# MiniMax M2.7 context limit: 128K tokens. 1 token ≈ 3.5 chars for English.
-# Use 80K chars as safe ceiling (leaves room for system prompt + tool defs + response).
-MINIMAX_MAX_CONTEXT_CHARS = 80_000
+# MiniMax M2.7 context: 204K tokens, ~3.5 chars/token.
+# Use 200K chars (~57K tokens) as input ceiling — leaves 140K+ tokens for output + reasoning.
+MINIMAX_MAX_CONTEXT_CHARS = 200_000
 
 
 def load_config() -> dict:
@@ -85,7 +86,7 @@ def load_system_prompt(data_home: Path = None) -> str:
 
     # Load memory files (most recent first, capped at budget)
     # Reserve 40K chars for system prompt total — leave rest for conversation
-    MAX_SYSTEM_CHARS = 40_000
+    MAX_SYSTEM_CHARS = 60_000
     memory_budget = max(0, MAX_SYSTEM_CHARS - len(core_text))
 
     memory_dir = home / "memory"
@@ -308,11 +309,11 @@ async def call_llm(messages: list[dict], cfg: dict) -> dict:
             "messages": clean_messages,
             "tools": build_openai_tools(AKICLAW_HOME),
             "tool_choice": "auto",
-            "max_tokens": 16384 if is_minimax else 4096,
+            "max_tokens": 64000 if is_minimax else 4096,
         }
         if is_minimax:
-            body["temperature"] = 0.7
-        async with httpx.AsyncClient(timeout=180 if is_minimax else 120) as client:
+            body["temperature"] = 1.0  # MiniMax recommended for agentic work
+        async with httpx.AsyncClient(timeout=240 if is_minimax else 120) as client:
             resp = await _request_with_retry(
                 client, "POST", cfg["endpoint"],
                 headers={
@@ -331,12 +332,22 @@ async def call_llm(messages: list[dict], cfg: dict) -> dict:
                          usage.get("completion_tokens", "?"),
                          usage.get("total_tokens", "?"))
 
-            # Detect MiniMax silent context overflow: 200 OK but 0 tokens used
+            # Detect MiniMax silent failures:
+            # 1. total_tokens=0 with no choices → full context overflow
+            # 2. completion_tokens=0 with choices → model gave up generating
             if is_minimax and usage.get("total_tokens", 1) == 0 and not data.get("choices"):
-                log.error("MiniMax returned 0 tokens (likely context overflow)")
+                log.error("MiniMax returned 0 tokens (context overflow)")
                 return {
                     "choices": [],
                     "error": {"message": "Context too large for model — auto-compacting"},
+                    "_context_overflow": True,
+                }
+            if is_minimax and usage.get("completion_tokens", 1) == 0 and usage.get("prompt_tokens", 0) > 0:
+                log.warning("MiniMax completion_tokens=0 (prompt=%d) — model refused to generate",
+                            usage.get("prompt_tokens", 0))
+                return {
+                    "choices": [],
+                    "error": {"message": "Model returned empty response — context may be too complex"},
                     "_context_overflow": True,
                 }
 
@@ -367,6 +378,12 @@ def _normalize_openai_response(data: dict) -> dict:
     msg = choice.get("message")
     if not msg:
         return {"choices": [], "error": {"message": "Empty message in response"}}
+
+    # Strip <think>...</think> reasoning tags (MiniMax M2.7, DeepSeek, etc.)
+    content = msg.get("content", "")
+    if content and "<think>" in content:
+        content = re.sub(r"<think>.*?</think>\s*", "", content, flags=re.DOTALL)
+        msg["content"] = content.strip()
 
     # Fix malformed tool_calls (some models return broken structures)
     tool_calls = msg.get("tool_calls")

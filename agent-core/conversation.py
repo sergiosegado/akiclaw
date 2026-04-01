@@ -120,9 +120,9 @@ class ConversationStore:
         messages = self.get_history()
         if len(messages) > max_context_messages:
             return True
-        # Also compact if total content exceeds 60K chars (safe for MiniMax)
+        # Also compact if total content exceeds 120K chars
         total_chars = sum(len(str(m.get("content", ""))) for m in messages)
-        if total_chars > 60_000:
+        if total_chars > 120_000:
             return True
         return False
 

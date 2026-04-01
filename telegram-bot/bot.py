@@ -164,6 +164,12 @@ async def agent_loop(chat_id: int, user_message: str, chat=None) -> str:
                 store.emergency_compact()
                 continue
             return f"LLM API error: {e.response.status_code}"
+        except httpx.ReadTimeout:
+            log.warning("ReadTimeout on turn %d — compacting and retrying", turns)
+            if turns <= max_turns - 2:
+                await _auto_compact(cfg)
+                continue
+            return "The model took too long to respond. Try a simpler request or say /reset to start fresh."
         except Exception as e:
             log.error("LLM call failed: %s", type(e).__name__)
             return f"Error calling LLM: {type(e).__name__}"
@@ -242,6 +248,11 @@ async def agent_loop(chat_id: int, user_message: str, chat=None) -> str:
 
                 log.info("TOOL [turn %d] %s: %s", turns, tool_name, str(args)[:150])
                 output = await execute_tool(tool_name, args)
+                # Cap tool outputs to prevent context explosion
+                # MCP responses (search results, API data) can be 50K+ chars
+                MAX_TOOL_OUTPUT = 4000
+                if len(output) > MAX_TOOL_OUTPUT:
+                    output = output[:MAX_TOOL_OUTPUT] + f"\n...(truncated from {len(output)} chars)"
                 store.append("tool", output, channel="telegram", tool_call_id=tc["id"])
 
             # Mid-loop compaction: prevent context from exploding during long builds
