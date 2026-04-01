@@ -58,28 +58,64 @@ def load_system_prompt(data_home: Path = None) -> str:
     """Load the full system prompt from markdown personality/skill files.
 
     Supports bootstrapping: if .bootstrapped flag exists, BOOTSTRAP.md is skipped.
-    This allows new agents to run a personality-discovery conversation on first message,
-    then skip it on subsequent runs.
+    Memory files are loaded most-recent-first and capped to fit context limits.
     """
     home = data_home or AKICLAW_HOME
     bootstrapped = (home / ".bootstrapped").exists()
-    parts = []
-    for subdir in ["core", "skills", "memory"]:
+
+    # Load core and skills (always included — these define the agent)
+    core_parts = []
+    for subdir in ["core", "skills"]:
         d = home / subdir
         if not d.is_dir():
             continue
         for f in sorted(d.glob("*.md")):
-            # Skip BOOTSTRAP.md after first-run bootstrap is complete
             if f.name == "BOOTSTRAP.md" and bootstrapped:
                 continue
             try:
-                parts.append(f.read_text())
+                core_parts.append(f.read_text())
             except Exception:
                 continue
+
     program = home / "autoresearch" / "PROGRAM.md"
     if program.exists():
-        parts.append(program.read_text())
-    return "\n\n---\n\n".join(parts)
+        core_parts.append(program.read_text())
+
+    core_text = "\n\n---\n\n".join(core_parts)
+
+    # Load memory files (most recent first, capped at budget)
+    # Reserve 40K chars for system prompt total — leave rest for conversation
+    MAX_SYSTEM_CHARS = 40_000
+    memory_budget = max(0, MAX_SYSTEM_CHARS - len(core_text))
+
+    memory_dir = home / "memory"
+    if memory_dir.is_dir() and memory_budget > 0:
+        mem_files = sorted(memory_dir.glob("*.md"), reverse=True)  # newest first
+        mem_parts = []
+        mem_chars = 0
+        for f in mem_files:
+            try:
+                content = f.read_text()
+                if mem_chars + len(content) > memory_budget:
+                    # Include truncated version of this file if we have room
+                    remaining = memory_budget - mem_chars
+                    if remaining > 200:
+                        mem_parts.append(content[:remaining] + "\n...(memory truncated)")
+                    break
+                mem_parts.append(content)
+                mem_chars += len(content)
+            except Exception:
+                continue
+        if mem_parts:
+            mem_parts.reverse()  # Back to chronological order
+            core_text += "\n\n---\n\n[Agent Memory]\n\n" + "\n\n---\n\n".join(mem_parts)
+
+    if len(core_text) > MAX_SYSTEM_CHARS:
+        log.warning("System prompt still too large (%d chars), hard-truncating to %d",
+                    len(core_text), MAX_SYSTEM_CHARS)
+        core_text = core_text[:MAX_SYSTEM_CHARS] + "\n...(system prompt truncated)"
+
+    return core_text
 
 
 def _anthropic_to_openai(resp_data: dict) -> dict:
