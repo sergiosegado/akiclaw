@@ -122,7 +122,7 @@ async def agent_loop(chat_id: int, user_message: str, chat=None) -> str:
     except Exception:
         pass
     if is_building:
-        max_turns = min(max_turns + 10, 35)
+        max_turns = min(max_turns + 10, 75)
         log.info("Build mode detected — max_turns raised to %d", max_turns)
 
     async def send_typing():
