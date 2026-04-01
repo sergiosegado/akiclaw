@@ -1,0 +1,38 @@
+services:
+  agent-bot:
+    build:
+      context: .
+      dockerfile: telegram-bot/Dockerfile
+    container_name: akiclaw-bot
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - AKICLAW_API_KEY=${AKICLAW_API_KEY}
+      - AKICLAW_MODEL=${AKICLAW_MODEL:-claude-sonnet-4-20250514}
+      - OPENROUTER_ENDPOINT=${OPENROUTER_ENDPOINT:-https://api.anthropic.com/v1/messages}
+      - TELEGRAM_ALLOWED_USERS=${TELEGRAM_ALLOWED_USERS}
+      - PUBLIC_DM_COMMANDS=${PUBLIC_DM_COMMANDS:-}
+      - DM_REJECT_MESSAGE=${DM_REJECT_MESSAGE:-}
+      - AKICLAW_HOME=/agent-data
+      - AKC_PROXY_URL=http://agent-proxy:9090
+    volumes:
+      - agent-data:/agent-data
+      # Uncomment for Docker access (shell tool can run docker commands):
+      # - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+    depends_on:
+      - agent-proxy
+
+  agent-proxy:
+    build:
+      context: ./proxy
+    container_name: akiclaw-proxy
+    environment:
+      - AKICLAW_HOME=/agent-data
+    volumes:
+      - agent-data:/agent-data
+    expose:
+      - "9090"
+    restart: unless-stopped
+
+volumes:
+  agent-data:

@@ -1,0 +1,37 @@
+# Environment and secrets
+.env
+*.env.local
+
+# Python
+*.pyc
+__pycache__/
+*.egg-info/
+dist/
+build/
+
+# Agent runtime data (never commit)
+data/vault/mcp-servers.json
+data/logs/
+data/conversation.json
+data/tasks/
+data/memory/MEMORY.md
+*.db
+*.sqlite
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docker
+docker-compose.override.yml
+
+# Multi-agent deployment (internal, not part of framework)
+agents/
+deploy.sh

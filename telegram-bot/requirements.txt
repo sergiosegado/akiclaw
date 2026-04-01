@@ -1,0 +1,3 @@
+python-telegram-bot[job-queue]==21.10
+httpx==0.28.1
+pyjwt==2.12.1
