@@ -183,8 +183,14 @@ def build_anthropic_tools(akc_home: Path) -> list[dict]:
     return tools
 
 
-def run_shell(command: str, timeout: int = 60, akc_home: Path = None) -> str:
+def run_shell(command: str, timeout: int = 30, akc_home: Path = None) -> str:
     """Execute a shell command with permission enforcement."""
+    # Block sleep commands that waste agent turns
+    if re.search(r'\bsleep\s+(\d+)', command):
+        match = re.search(r'\bsleep\s+(\d+)', command)
+        if match and int(match.group(1)) > 10:
+            return "BLOCKED: sleep >10s is not allowed in agent tool calls. Use a scheduled task or cron instead."
+
     # Always block catastrophic commands
     if DANGEROUS_PATTERNS.search(command):
         return "BLOCKED: destructive command detected. Ask for human confirmation before retrying."
@@ -211,8 +217,8 @@ def run_shell(command: str, timeout: int = 60, akc_home: Path = None) -> str:
             command, shell=True, capture_output=True, text=True, timeout=timeout
         )
         output = (result.stdout + result.stderr).strip()
-        if len(output) > 16000:
-            output = output[:8000] + "\n...[truncated]...\n" + output[-8000:]
+        if len(output) > 4000:
+            output = output[:2000] + "\n...[truncated]...\n" + output[-2000:]
         return output or "(no output)"
     except subprocess.TimeoutExpired:
         return f"ERROR: timed out after {timeout}s"
@@ -238,8 +244,8 @@ async def run_mcp_request(
                 content=body.encode() if body else None,
             )
             text = resp.text
-            if len(text) > 16000:
-                text = text[:8000] + "\n...[truncated]...\n" + text[-8000:]
+            if len(text) > 4000:
+                text = text[:2000] + "\n...[truncated]...\n" + text[-2000:]
             return f"HTTP {resp.status_code}\n{text}"
     except httpx.TimeoutException:
         return "ERROR: MCP request timed out"

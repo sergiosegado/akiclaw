@@ -248,11 +248,6 @@ async def agent_loop(chat_id: int, user_message: str, chat=None) -> str:
 
                 log.info("TOOL [turn %d] %s: %s", turns, tool_name, str(args)[:150])
                 output = await execute_tool(tool_name, args)
-                # Cap tool outputs to prevent context explosion
-                # MCP responses (search results, API data) can be 50K+ chars
-                MAX_TOOL_OUTPUT = 4000
-                if len(output) > MAX_TOOL_OUTPUT:
-                    output = output[:MAX_TOOL_OUTPUT] + f"\n...(truncated from {len(output)} chars)"
                 store.append("tool", output, channel="telegram", tool_call_id=tc["id"])
 
             # Mid-loop compaction: prevent context from exploding during long builds
