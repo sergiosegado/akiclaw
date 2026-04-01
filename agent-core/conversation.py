@@ -81,22 +81,35 @@ class ConversationStore:
         self._write(data)
 
     def get_llm_messages(self) -> list[dict]:
-        """Return messages formatted for LLM API (strip metadata, remove orphans)."""
+        """Return messages formatted for LLM API (strip metadata, remove orphans).
+        Ensures every assistant tool_call has a matching tool result and vice versa."""
         raw = self.get_history()
 
-        # Collect all tool_call IDs present in assistant messages
-        valid_tc_ids = set()
+        # Collect all tool_call IDs from assistant messages
+        assistant_tc_ids = set()
         for msg in raw:
             for tc in msg.get("tool_calls", []):
                 tc_id = tc.get("id", "")
                 if tc_id:
-                    valid_tc_ids.add(tc_id)
+                    assistant_tc_ids.add(tc_id)
+
+        # Collect all tool_call_ids from tool result messages
+        result_tc_ids = set()
+        for msg in raw:
+            if msg.get("role") == "tool" and msg.get("tool_call_id"):
+                result_tc_ids.add(msg["tool_call_id"])
 
         messages = []
         for msg in raw:
-            # Skip orphaned tool results (tool_call_id not in any assistant message)
+            # Skip orphaned tool results (no matching assistant tool_call)
             if msg.get("role") == "tool" and msg.get("tool_call_id"):
-                if msg["tool_call_id"] not in valid_tc_ids:
+                if msg["tool_call_id"] not in assistant_tc_ids:
+                    continue
+
+            # Skip orphaned assistant tool_calls (no matching tool result)
+            if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                tc_ids = [tc.get("id", "") for tc in msg["tool_calls"]]
+                if not any(tid in result_tc_ids for tid in tc_ids):
                     continue
 
             llm_msg = {"role": msg["role"]}
